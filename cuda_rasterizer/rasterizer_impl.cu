@@ -206,6 +206,7 @@ int CudaRasterizer::Rasterizer::forward(
 	const float* shs,
 	const float* colors_precomp,
 	const float* opacities,
+	const float* importances,
 	const float* scales,
 	const float scale_modifier,
 	const float* rotations,
@@ -216,6 +217,7 @@ int CudaRasterizer::Rasterizer::forward(
 	const float tan_fovx, float tan_fovy,
 	const bool prefiltered,
 	float* out_color,
+	float* out_importance_map,
 	int* radii,
 	bool debug)
 {
@@ -327,10 +329,12 @@ int CudaRasterizer::Rasterizer::forward(
 		geomState.means2D,
 		feature_ptr,
 		geomState.conic_opacity,
+		importances,
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		background,
-		out_color), debug)
+		out_color,
+		out_importance_map), debug)
 
 	return num_rendered;
 }
@@ -360,6 +364,7 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_dmean2D,
 	float* dL_dconic,
 	float* dL_dopacity,
+	float* dL_dimportance,
 	float* dL_dcolor,
 	float* dL_dmean3D,
 	float* dL_dcov3D,
@@ -403,6 +408,7 @@ void CudaRasterizer::Rasterizer::backward(
 		(float3*)dL_dmean2D,
 		(float4*)dL_dconic,
 		dL_dopacity,
+		dL_dimportance,
 		dL_dcolor), debug)
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance

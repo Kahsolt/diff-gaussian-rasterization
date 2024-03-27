@@ -405,10 +405,12 @@ renderCUDA(
 	const float* __restrict__ bg_color,
 	const float2* __restrict__ points_xy_image,
 	const float4* __restrict__ conic_opacity,
+	const float* __restrict__ importances,
 	const float* __restrict__ colors,
 	const float* __restrict__ final_Ts,
 	const uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ dL_dpixels,
+	const float* __restrict__ dL_dpixel_importances,
 	float3* __restrict__ dL_dmean2D,
 	float4* __restrict__ dL_dconic2D,
 	float* __restrict__ dL_dopacity,
@@ -435,6 +437,7 @@ renderCUDA(
 	__shared__ int collected_id[BLOCK_SIZE];
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
+	__shared__ float collected_importances[BLOCK_SIZE];
 	__shared__ float collected_colors[C * BLOCK_SIZE];
 
 	// In the forward, we stored the final value for T, the
@@ -449,12 +452,17 @@ renderCUDA(
 
 	float accum_rec[C] = { 0 };
 	float dL_dpixel[C];
-	if (inside)
+	float accum_importance_rec = 0;
+	float dL_dpixel_importance = 0;
+	if (inside) {
 		for (int i = 0; i < C; i++)
 			dL_dpixel[i] = dL_dpixels[i * H * W + pix_id];
+		dL_dpixel_importance = dL_dpixel_importances[pix_id];
+	}
 
 	float last_alpha = 0;
 	float last_color[C] = { 0 };
+	float last_importance = 0;
 
 	// Gradient of pixel coordinate w.r.t. normalized 
 	// screen-space viewport corrdinates (-1 to 1)
@@ -474,6 +482,7 @@ renderCUDA(
 			collected_id[block.thread_rank()] = coll_id;
 			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
 			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
+			collected_importances[block.thread_rank()] = importances[coll_id];
 			for (int i = 0; i < C; i++)
 				collected_colors[i * BLOCK_SIZE + block.thread_rank()] = colors[coll_id * C + i];
 		}
@@ -503,6 +512,7 @@ renderCUDA(
 
 			T = T / (1.f - alpha);
 			const float dchannel_dcolor = alpha * T;
+			const float dpixel_importance_dimportance = alpha * T;
 
 			// Propagate gradients to per-Gaussian colors and keep
 			// gradients w.r.t. alpha (blending factor for a Gaussian/pixel
@@ -523,6 +533,14 @@ renderCUDA(
 				// many that were affected by this Gaussian.
 				atomicAdd(&(dL_dcolors[global_id * C + ch]), dchannel_dcolor * dL_dchannel);
 			}
+			// Propagate gradients to per-Gaussian importance and keep gradients w.r.t. alpha
+			const float c_i = collected_importances[j];
+			accum_importance_rec = last_alpha * last_importance + (1.f - last_alpha) * accum_importance_rec;
+			last_importance = c_i;
+			dL_dalpha += (c_i - accum_importance_rec) * dL_dpixel_importance;
+			// Update the gradients w.r.t. importance of the Gaussian. 
+			atomicAdd(&(dL_dimportance[global_id]), dpixel_importance_dimportance * dL_dpixel_importance);
+
 			dL_dalpha *= T;
 			// Update last alpha (to be used in the next iteration)
 			last_alpha = alpha;
@@ -553,9 +571,6 @@ renderCUDA(
 
 			// Update gradients w.r.t. opacity of the Gaussian
 			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
-
-			// Update gradients w.r.t. importance of the Gaussian
-			atomicAdd(&(dL_dimportance[global_id]), G * dL_dalpha);	// TODO: what to do?
 		}
 	}
 }
@@ -633,10 +648,12 @@ void BACKWARD::render(
 	const float* bg_color,
 	const float2* means2D,
 	const float4* conic_opacity,
+	const float* importances,
 	const float* colors,
 	const float* final_Ts,
 	const uint32_t* n_contrib,
 	const float* dL_dpixels,
+	const float* dL_dpixel_importances,
 	float3* dL_dmean2D,
 	float4* dL_dconic2D,
 	float* dL_dopacity,
@@ -650,10 +667,12 @@ void BACKWARD::render(
 		bg_color,
 		means2D,
 		conic_opacity,
+		importances,
 		colors,
 		final_Ts,
 		n_contrib,
 		dL_dpixels,
+		dL_dpixel_importances,
 		dL_dmean2D,
 		dL_dconic2D,
 		dL_dopacity,

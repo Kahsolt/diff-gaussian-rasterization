@@ -303,7 +303,7 @@ renderCUDA(
 	uint32_t contributor = 0;
 	uint32_t last_contributor = 0;
 	float C[CHANNELS] = { 0 };
-	float O = { 0 };
+	float O = 0;
 
 	// Iterate over batches until all done or range is complete
 	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
@@ -336,7 +336,7 @@ renderCUDA(
 			float2 d = { xy.x - pixf.x, xy.y - pixf.y };
 			float4 con_o = collected_conic_opacity[j];
 			float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
-			if (power > 0.0f)
+			if (power > 0.0f)  // ignore guassians out of viewcone (?)
 				continue;
 
 			// Eq. (2) from 3D Gaussian splatting paper.
@@ -344,10 +344,10 @@ renderCUDA(
 			// and its exponential falloff from mean.
 			// Avoid numerical instabilities (see paper appendix). 
 			float alpha = min(0.99f, con_o.w * exp(power));
-			if (alpha < 1.0f / 255.0f)
+			if (alpha < 1.0f / 255.0f)  // ignore guassians with too small opacity to be visble
 				continue;
 			float test_T = T * (1 - alpha);
-			if (test_T < 0.0001f)
+			if (test_T < 0.0001f)  // early stop when a pixel is saturated in opacity
 			{
 				done = true;
 				continue;
@@ -356,7 +356,7 @@ renderCUDA(
 			// Eq. (3) from 3D Gaussian splatting paper.
 			for (int ch = 0; ch < CHANNELS; ch++)
 				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
-			O += importance[collected_id[j]] * alpha * T;
+			O += importances[collected_id[j]] * alpha * T;
 
 			T = test_T;
 
@@ -374,8 +374,7 @@ renderCUDA(
 		n_contrib[pix_id] = last_contributor;
 		for (int ch = 0; ch < CHANNELS; ch++)
 			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
-
-		out_importance_map[pix_id] = O;		// TODO: what to do?
+		out_importance_map[pix_id] = O;
 	}
 }
 

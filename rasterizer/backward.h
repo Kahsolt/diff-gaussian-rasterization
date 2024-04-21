@@ -57,6 +57,7 @@ namespace Rasterizer::Backward
 		const float* colors,
 		const float* final_Ts,
 		const uint32_t* n_contrib,
+		const int limit_n_contrib,
 		const float* dL_dpixels,
 		const float* dL_dpixel_importances,
 		float3* dL_dmean2D,

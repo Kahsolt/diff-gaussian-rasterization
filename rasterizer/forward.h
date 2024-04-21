@@ -62,6 +62,7 @@ namespace Rasterizer::Forward
 		float* final_T,
 		uint32_t* n_contrib,
 		const float* bg_color,
+		const int limit_n_contrib,
 		float* out_color,
 		float* out_importance_map,
 		int* out_n_contrib

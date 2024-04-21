@@ -267,6 +267,7 @@ renderCUDA(
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
+	const int limit_n_contrib,
 	float* __restrict__ out_color,
 	float* __restrict__ out_importance_map,
 	int* __restrict__ out_n_contrib
@@ -359,6 +360,11 @@ renderCUDA(
 
 			// effective contributers
 			n_contributor++;
+			// early stop when a pixel is saturated in contributor count
+			if (limit_n_contrib > 0 && n_contributor >= limit_n_contrib) {
+				done = true;
+				continue;
+			}
 		}
 	}
 
@@ -441,6 +447,7 @@ void Rasterizer::Forward::render(
 	float* final_T,
 	uint32_t* n_contrib,
 	const float* bg_color,
+	const int limit_n_contrib,
 	float* out_color,
 	float* out_importance_map,
 	int* out_n_contrib
@@ -456,6 +463,7 @@ void Rasterizer::Forward::render(
 		final_T,
 		n_contrib,
 		bg_color,
+		limit_n_contrib,
 		out_color,
 		out_importance_map,
 		out_n_contrib

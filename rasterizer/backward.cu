@@ -409,6 +409,7 @@ renderCUDA(
 	const float* __restrict__ colors,
 	const float* __restrict__ final_Ts,
 	const uint32_t* __restrict__ n_contrib,
+	const int limit_n_contrib,
 	const float* __restrict__ dL_dpixels,
 	const float* __restrict__ dL_dpixel_importances,
 	float3* __restrict__ dL_dmean2D,
@@ -448,6 +449,7 @@ renderCUDA(
 	// We start from the back. The ID of the last contributing
 	// Gaussian is known from each pixel from the forward.
 	uint32_t contributor = toDo;
+	uint32_t n_contributor = 0;
 	const int last_contributor = inside ? n_contrib[pix_id] : 0;
 
 	float accum_rec[C] = { 0 };
@@ -566,6 +568,14 @@ renderCUDA(
 
 			// Update gradients w.r.t. opacity of the Gaussian
 			atomicAdd(&(dL_dopacity[global_id]), G * dL_dalpha);
+
+			// effective contributers
+			n_contributor++;
+			// early stop when a pixel is saturated in contributor count
+			if (limit_n_contrib > 0 && n_contributor >= limit_n_contrib) {
+				done = true;
+				continue;
+			}
 		}
 	}
 }
@@ -649,6 +659,7 @@ void Rasterizer::Backward::render(
 	const float* colors,
 	const float* final_Ts,
 	const uint32_t* n_contrib,
+	const int limit_n_contrib,
 	const float* dL_dpixels,
 	const float* dL_dpixel_importances,
 	float3* dL_dmean2D,
@@ -668,6 +679,7 @@ void Rasterizer::Backward::render(
 		colors,
 		final_Ts,
 		n_contrib,
+		limit_n_contrib,
 		dL_dpixels,
 		dL_dpixel_importances,
 		dL_dmean2D,

@@ -9,6 +9,7 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
+from dataclasses import dataclass
 from typing import Tuple, NamedTuple
 
 import torch
@@ -55,10 +56,27 @@ class ImageState:
     def ranges(self): return self._ranges
 
 
+@dataclass
+class GaussianRasterizationSettings:
+    image_height: int
+    image_width: int 
+    tanfovx: float
+    tanfovy: float
+    bg: Tensor
+    scale_modifier: float
+    viewmatrix: Tensor
+    projmatrix: Tensor
+    sh_degree: int
+    campos: Tensor
+    prefiltered: bool = False
+    debug: bool = False
+    limit_n_contrib: bool = -1
+
+
 class CudaRasterizer(Function):
 
     @staticmethod
-    def forward(ctx, means3D, means2D, sh, colors_precomp, opacities, importances, scales, rotations, cov3Ds_precomp, raster_settings):
+    def forward(ctx, means3D, means2D, sh, colors_precomp, opacities, importances, scales, rotations, cov3Ds_precomp, raster_settings:GaussianRasterizationSettings):
         # Restructure arguments the way that the C++ lib expects them
         args = (
             raster_settings.bg,             # [C=3]
@@ -69,6 +87,7 @@ class CudaRasterizer(Function):
             scales,                         # [P=182686, pos=3]
             rotations,                      # [P=182686, Q=4]
             raster_settings.scale_modifier, # 1.0
+            raster_settings.limit_n_contrib, # -1
             cov3Ds_precomp,                 # no use
             raster_settings.viewmatrix,     # [4, 4]
             raster_settings.projmatrix,     # [4, 4]
@@ -103,7 +122,7 @@ class CudaRasterizer(Function):
     def backward(ctx, grad_out_color, grad_radii, grad_out_importance_map, grad_n_contrib, grad_imgBuffer):
         # Restore necessary values from context
         num_rendered = ctx.num_rendered
-        raster_settings = ctx.raster_settings
+        raster_settings: GaussianRasterizationSettings = ctx.raster_settings
         colors_precomp, importances, means3D, scales, rotations, cov3Ds_precomp, radii, sh, geomBuffer, binningBuffer, imgBuffer = ctx.saved_tensors
 
         # Restructure args as C++ method expects them
@@ -116,6 +135,7 @@ class CudaRasterizer(Function):
             scales, 
             rotations, 
             raster_settings.scale_modifier, 
+            raster_settings.limit_n_contrib, 
             cov3Ds_precomp, 
             raster_settings.viewmatrix, 
             raster_settings.projmatrix, 
@@ -157,32 +177,17 @@ class CudaRasterizer(Function):
         )
 
 
-class GaussianRasterizationSettings(NamedTuple):
-    image_height: int
-    image_width: int 
-    tanfovx: float
-    tanfovy: float
-    bg: Tensor
-    scale_modifier: float
-    viewmatrix: Tensor
-    projmatrix: Tensor
-    sh_degree: int
-    campos: Tensor
-    prefiltered: bool
-    debug: bool        # NOTE: not used
-
-
 class GaussianRasterizer(nn.Module):
 
-    def __init__(self, settings:GaussianRasterizationSettings):
+    def __init__(self, raster_settings:GaussianRasterizationSettings):
         super().__init__()
 
-        self.settings = settings
+        self.raster_settings = raster_settings
 
     @torch.no_grad
     def markVisible(self, positions):
         # Mark visible points (based on frustum culling for camera) with a boolean 
-        raster_settings = self.settings
+        raster_settings = self.raster_settings
         visible = _C.mark_visible(
             positions,
             raster_settings.viewmatrix,
@@ -191,7 +196,7 @@ class GaussianRasterizer(nn.Module):
         return visible
 
     def forward(self, means3D, means2D, opacities, importances=None, shs=None, colors_precomp=None, scales=None, rotations=None, cov3D_precomp=None):
-        raster_settings = self.settings
+        raster_settings = self.raster_settings
 
         if (shs is None and colors_precomp is None) or (shs is not None and colors_precomp is not None):
             raise Exception('Please provide excatly one of either SHs or precomputed colors!')
@@ -212,7 +217,7 @@ class GaussianRasterizer(nn.Module):
             cov3D_precomp = Tensor([])
 
         # Invoke C++/CUDA rasterization routine
-        color, radii, importance_map, n_contrib, imgBuffer =  CudaRasterizer.apply(
+        color, radii, importance_map, n_contrib, imgBuffer = CudaRasterizer.apply(
             means3D,
             means2D,
             shs,

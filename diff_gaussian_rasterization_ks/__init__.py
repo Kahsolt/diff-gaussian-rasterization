@@ -9,7 +9,7 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
-from typing import NamedTuple
+from typing import Tuple, NamedTuple
 
 import torch
 import torch.nn as nn
@@ -23,22 +23,42 @@ def cpu_deep_copy_tuple(input_tuple):
     return tuple([item.detach().clone().cpu() if isinstance(item, Tensor) else item for item in input_tuple])
 
 
+class ImageState:
+
+    def __init__(self, buffer:Tensor, size:Tuple[int, int], align:int=128):
+        H, W = size
+        N = H * W
+        offset = 0
+        buffer = buffer.cpu().numpy()
+
+        def next_offset() -> int:
+            nonlocal offset
+            while offset % align:
+                offset += 1
+
+        next_offset()
+        final_T = torch.frombuffer(memoryview(buffer[offset:offset+4*N]), dtype=torch.float32).reshape((H, W))
+        next_offset()
+        n_contrib = torch.frombuffer(memoryview(buffer[offset:offset+4*N]), dtype=torch.int32).reshape((H, W))
+        next_offset()
+        ranges = torch.frombuffer(memoryview(buffer[offset:offset+8*N]), dtype=torch.int32).reshape((H, W, 2))
+
+        self._final_T = final_T      # float, 4 bytes
+        self._n_contrib = n_contrib  # uint32_t, 4 bytes
+        self._ranges = ranges        # uint2, 8 bytes
+
+    @property
+    def final_T(self): return self._final_T
+    @property
+    def n_contrib(self): return self._n_contrib
+    @property
+    def ranges(self): return self._ranges
+
+
 class CudaRasterizer(Function):
 
     @staticmethod
-    def forward(
-        ctx,
-        means3D,
-        means2D,
-        sh,
-        colors_precomp,
-        opacities,
-        importances,
-        scales,
-        rotations,
-        cov3Ds_precomp,
-        raster_settings,
-    ):
+    def forward(ctx, means3D, means2D, sh, colors_precomp, opacities, importances, scales, rotations, cov3Ds_precomp, raster_settings):
         # Restructure arguments the way that the C++ lib expects them
         args = (
             raster_settings.bg,             # [C=3]
@@ -77,10 +97,10 @@ class CudaRasterizer(Function):
         ctx.raster_settings = raster_settings
         ctx.num_rendered = num_rendered
         ctx.save_for_backward(colors_precomp, importances, means3D, scales, rotations, cov3Ds_precomp, radii, sh, geomBuffer, binningBuffer, imgBuffer)
-        return color, importance_map, n_contrib, radii, imgBuffer
+        return color, radii, importance_map, n_contrib, imgBuffer
 
     @staticmethod
-    def backward(ctx, grad_out_color, grad_out_importance_map, grad_n_contrib, grad_radii, grad_imgBuffer):
+    def backward(ctx, grad_out_color, grad_radii, grad_out_importance_map, grad_n_contrib, grad_imgBuffer):
         # Restore necessary values from context
         num_rendered = ctx.num_rendered
         raster_settings = ctx.raster_settings
@@ -192,7 +212,7 @@ class GaussianRasterizer(nn.Module):
             cov3D_precomp = Tensor([])
 
         # Invoke C++/CUDA rasterization routine
-        color, importance_map, n_contrib, radii, imgBuffer =  CudaRasterizer.apply(
+        color, radii, importance_map, n_contrib, imgBuffer =  CudaRasterizer.apply(
             means3D,
             means2D,
             shs,
@@ -204,5 +224,5 @@ class GaussianRasterizer(nn.Module):
             cov3D_precomp,
             raster_settings, 
         )
-
-        return color, importance_map, n_contrib, radii, imgBuffer
+        img_state = ImageState(imgBuffer, (raster_settings.image_height, raster_settings.image_width))
+        return color, radii, importance_map, n_contrib, img_state

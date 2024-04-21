@@ -177,8 +177,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	float4* conic_opacity,
 	const dim3 grid,
 	uint32_t* tiles_touched,
-	bool prefiltered)
-{
+	bool prefiltered
+) {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P)
 		return;
@@ -202,12 +202,9 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// If 3D covariance matrix is precomputed, use it, otherwise compute
 	// from scaling and rotation parameters. 
 	const float* cov3D;
-	if (cov3D_precomp != nullptr)
-	{
+	if (cov3D_precomp != nullptr) {
 		cov3D = cov3D_precomp + idx * 6;
-	}
-	else
-	{
+	}	else {
 		computeCov3D(scales[idx], scale_modifier, rotations[idx], cov3Ds + idx * 6);
 		cov3D = cov3Ds + idx * 6;
 	}
@@ -238,8 +235,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// If colors have been precomputed, use them, otherwise convert
 	// spherical harmonics coefficients to RGB color.
-	if (colors_precomp == nullptr)
-	{
+	if (colors_precomp == nullptr) {
 		glm::vec3 result = computeColorFromSH(idx, D, M, (glm::vec3*)orig_points, *cam_pos, shs, clamped);
 		rgb[idx * C + 0] = result.x;
 		rgb[idx * C + 1] = result.y;
@@ -272,8 +268,8 @@ renderCUDA(
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color,
-	float* __restrict__ out_importance_map)
-{
+	float* __restrict__ out_importance_map
+) {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
 	uint32_t horizontal_blocks = (W + BLOCK_X - 1) / BLOCK_X;
@@ -306,8 +302,7 @@ renderCUDA(
 	float O = 0;
 
 	// Iterate over batches until all done or range is complete
-	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
-	{
+	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE) {
 		// End if entire block votes that it is done rasterizing
 		int num_done = __syncthreads_count(done);
 		if (num_done == BLOCK_SIZE)
@@ -315,8 +310,7 @@ renderCUDA(
 
 		// Collectively fetch per-Gaussian data from global to shared
 		int progress = i * BLOCK_SIZE + block.thread_rank();
-		if (range.x + progress < range.y)
-		{
+		if (range.x + progress < range.y) {
 			int coll_id = point_list[range.x + progress];
 			collected_id[block.thread_rank()] = coll_id;
 			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
@@ -325,8 +319,7 @@ renderCUDA(
 		block.sync();
 
 		// Iterate over current batch
-		for (int j = 0; !done && j < min(BLOCK_SIZE, toDo); j++)
-		{
+		for (int j = 0; !done && j < min(BLOCK_SIZE, toDo); j++) {
 			// Keep track of current position in range
 			contributor++;
 
@@ -347,8 +340,7 @@ renderCUDA(
 			if (alpha < 1.0f / 255.0f)  // ignore guassians with too small opacity to be visble
 				continue;
 			float test_T = T * (1 - alpha);
-			if (test_T < 0.0001f)  // early stop when a pixel is saturated in opacity
-			{
+			if (test_T < 0.0001f) { // early stop when a pixel is saturated in opacity
 				done = true;
 				continue;
 			}
@@ -368,8 +360,7 @@ renderCUDA(
 
 	// All threads that treat valid pixel write out their final
 	// rendering data to the frame and auxiliary buffers.
-	if (inside)
-	{
+	if (inside) {
 		final_T[pix_id] = T;
 		n_contrib[pix_id] = last_contributor;
 		for (int ch = 0; ch < CHANNELS; ch++)
@@ -378,37 +369,7 @@ renderCUDA(
 	}
 }
 
-void FORWARD::render(
-	const dim3 grid, dim3 block,
-	const uint2* ranges,
-	const uint32_t* point_list,
-	int W, int H,
-	const float2* means2D,
-	const float* colors,
-	const float4* conic_opacity,
-	const float* importances,
-	float* final_T,
-	uint32_t* n_contrib,
-	const float* bg_color,
-	float* out_color,
-	float* out_importance_map)
-{
-	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
-		ranges,
-		point_list,
-		W, H,
-		means2D,
-		colors,
-		conic_opacity,
-		importances,
-		final_T,
-		n_contrib,
-		bg_color,
-		out_color,
-		out_importance_map);
-}
-
-void FORWARD::preprocess(int P, int D, int M,
+void Rasterizer::Forward::preprocess(int P, int D, int M,
 	const float* means3D,
 	const glm::vec3* scales,
 	const float scale_modifier,
@@ -432,8 +393,8 @@ void FORWARD::preprocess(int P, int D, int M,
 	float4* conic_opacity,
 	const dim3 grid,
 	uint32_t* tiles_touched,
-	bool prefiltered)
-{
+	bool prefiltered
+) {
 	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256 >> > (
 		P, D, M,
 		means3D,
@@ -460,5 +421,36 @@ void FORWARD::preprocess(int P, int D, int M,
 		grid,
 		tiles_touched,
 		prefiltered
-		);
+	);
+}
+
+void Rasterizer::Forward::render(
+	const dim3 grid, dim3 block,
+	const uint2* ranges,
+	const uint32_t* point_list,
+	int W, int H,
+	const float2* means2D,
+	const float* colors,
+	const float4* conic_opacity,
+	const float* importances,
+	float* final_T,
+	uint32_t* n_contrib,
+	const float* bg_color,
+	float* out_color,
+	float* out_importance_map
+) {
+	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
+		ranges,
+		point_list,
+		W, H,
+		means2D,
+		colors,
+		conic_opacity,
+		importances,
+		final_T,
+		n_contrib,
+		bg_color,
+		out_color,
+		out_importance_map
+	);
 }

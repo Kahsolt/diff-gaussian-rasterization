@@ -9,8 +9,8 @@
  * For inquiries contact  george.drettakis@inria.fr
  */
 
-#ifndef CUDA_RASTERIZER_BACKWARD_H_INCLUDED
-#define CUDA_RASTERIZER_BACKWARD_H_INCLUDED
+#ifndef RASTERIZER_BACKWARD_H
+#define RASTERIZER_BACKWARD_H
 
 #include <cuda.h>
 #include "cuda_runtime.h"
@@ -18,28 +18,8 @@
 #define GLM_FORCE_CUDA
 #include <glm/glm.hpp>
 
-namespace BACKWARD
+namespace Rasterizer::Backward
 {
-	void render(
-		const dim3 grid, dim3 block,
-		const uint2* ranges,
-		const uint32_t* point_list,
-		int W, int H,
-		const float* bg_color,
-		const float2* means2D,
-		const float4* conic_opacity,
-		const float* importances,
-		const float* colors,
-		const float* final_Ts,
-		const uint32_t* n_contrib,
-		const float* dL_dpixels,
-		const float* dL_dpixel_importances,
-		float3* dL_dmean2D,
-		float4* dL_dconic2D,
-		float* dL_dopacity,
-		float* dL_dimportance,
-		float* dL_dcolors);
-
 	void preprocess(
 		int P, int D, int M,
 		const float3* means,
@@ -62,7 +42,29 @@ namespace BACKWARD
 		float* dL_dcov3D,
 		float* dL_dsh,
 		glm::vec3* dL_dscale,
-		glm::vec4* dL_drot);
+		glm::vec4* dL_drot
+	);
+
+	void render(
+		const dim3 grid, dim3 block,
+		const uint2* ranges,
+		const uint32_t* point_list,
+		int W, int H,
+		const float* bg_color,
+		const float2* means2D,
+		const float4* conic_opacity,
+		const float* importances,
+		const float* colors,
+		const float* final_Ts,
+		const uint32_t* n_contrib,
+		const float* dL_dpixels,
+		const float* dL_dpixel_importances,
+		float3* dL_dmean2D,
+		float4* dL_dconic2D,
+		float* dL_dopacity,
+		float* dL_dimportance,
+		float* dL_dcolors
+	);
 }
 
 #endif

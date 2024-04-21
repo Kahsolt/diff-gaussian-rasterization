@@ -9,7 +9,6 @@
  * For inquiries contact  george.drettakis@inria.fr
  */
 
-#include "rasterizer_impl.h"
 #include <iostream>
 #include <fstream>
 #include <algorithm>
@@ -29,6 +28,8 @@ namespace cg = cooperative_groups;
 #include "auxiliary.h"
 #include "forward.h"
 #include "backward.h"
+#include "rasterizer.h"
+using namespace RasterizerState;
 
 // Helper function to find the next-highest bit of the MSB
 // on the CPU.
@@ -51,7 +52,8 @@ uint32_t getHigherMsb(uint32_t n)
 
 // Wrapper method to call auxiliary coarse frustum containment test.
 // Mark all Gaussians that pass it.
-__global__ void checkFrustum(int P,
+__global__ void checkFrustum(
+	int P,
 	const float* orig_points,
 	const float* viewmatrix,
 	const float* projmatrix,
@@ -137,22 +139,7 @@ __global__ void identifyTileRanges(int L, uint64_t* point_list_keys, uint2* rang
 		ranges[currtile].y = L;
 }
 
-// Mark Gaussians as visible/invisible, based on view frustum testing
-void CudaRasterizer::Rasterizer::markVisible(
-	int P,
-	float* means3D,
-	float* viewmatrix,
-	float* projmatrix,
-	bool* present)
-{
-	checkFrustum << <(P + 255) / 256, 256 >> > (
-		P,
-		means3D,
-		viewmatrix, projmatrix,
-		present);
-}
-
-CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& chunk, size_t P)
+GeometryState GeometryState::fromChunk(char*& chunk, size_t P)
 {
 	GeometryState geom;
 	obtain(chunk, geom.depths, P, 128);
@@ -169,7 +156,7 @@ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& ch
 	return geom;
 }
 
-CudaRasterizer::ImageState CudaRasterizer::ImageState::fromChunk(char*& chunk, size_t N)
+ImageState ImageState::fromChunk(char*& chunk, size_t N)
 {
 	ImageState img;
 	obtain(chunk, img.accum_alpha, N, 128);
@@ -178,7 +165,7 @@ CudaRasterizer::ImageState CudaRasterizer::ImageState::fromChunk(char*& chunk, s
 	return img;
 }
 
-CudaRasterizer::BinningState CudaRasterizer::BinningState::fromChunk(char*& chunk, size_t P)
+BinningState BinningState::fromChunk(char*& chunk, size_t P)
 {
 	BinningState binning;
 	obtain(chunk, binning.point_list, P, 128);
@@ -195,7 +182,7 @@ CudaRasterizer::BinningState CudaRasterizer::BinningState::fromChunk(char*& chun
 
 // Forward rendering procedure for differentiable rasterization
 // of Gaussians.
-int CudaRasterizer::Rasterizer::forward(
+int Rasterizer::forward(
 	std::function<char* (size_t)> geometryBuffer,
 	std::function<char* (size_t)> binningBuffer,
 	std::function<char* (size_t)> imageBuffer,
@@ -219,8 +206,8 @@ int CudaRasterizer::Rasterizer::forward(
 	float* out_color,
 	float* out_importance_map,
 	int* radii,
-	bool debug)
-{
+	bool debug
+) {
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
 
@@ -228,8 +215,7 @@ int CudaRasterizer::Rasterizer::forward(
 	char* chunkptr = geometryBuffer(chunk_size);
 	GeometryState geomState = GeometryState::fromChunk(chunkptr, P);
 
-	if (radii == nullptr)
-	{
+	if (radii == nullptr) {
 		radii = geomState.internal_radii;
 	}
 
@@ -241,13 +227,12 @@ int CudaRasterizer::Rasterizer::forward(
 	char* img_chunkptr = imageBuffer(img_chunk_size);
 	ImageState imgState = ImageState::fromChunk(img_chunkptr, width * height);
 
-	if (NUM_CHANNELS != 3 && colors_precomp == nullptr)
-	{
+	if (NUM_CHANNELS != 3 && colors_precomp == nullptr)	{
 		throw std::runtime_error("For non-RGB, provide precomputed Gaussian colors!");
 	}
 
 	// Run preprocessing per-Gaussian (transformation, bounding, conversion of SHs to RGB)
-	CHECK_CUDA(FORWARD::preprocess(
+	CHECK_CUDA(Rasterizer::Forward::preprocess(
 		P, D, M,
 		means3D,
 		(glm::vec3*)scales,
@@ -296,7 +281,8 @@ int CudaRasterizer::Rasterizer::forward(
 		binningState.point_list_keys_unsorted,
 		binningState.point_list_unsorted,
 		radii,
-		tile_grid)
+		tile_grid
+	);
 	CHECK_CUDA(, debug)
 
 	int bit = getHigherMsb(tile_grid.x * tile_grid.y);
@@ -316,12 +302,13 @@ int CudaRasterizer::Rasterizer::forward(
 		identifyTileRanges << <(num_rendered + 255) / 256, 256 >> > (
 			num_rendered,
 			binningState.point_list_keys,
-			imgState.ranges);
+			imgState.ranges
+		);
 	CHECK_CUDA(, debug)
 
 	// Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
-	CHECK_CUDA(FORWARD::render(
+	CHECK_CUDA(Rasterizer::Forward::render(
 		tile_grid, block,
 		imgState.ranges,
 		binningState.point_list,
@@ -341,7 +328,7 @@ int CudaRasterizer::Rasterizer::forward(
 
 // Produce necessary gradients for optimization, corresponding
 // to forward render pass
-void CudaRasterizer::Rasterizer::backward(
+void Rasterizer::backward(
 	const int P, int D, int M, int R,
 	const float* background,
 	const int width, int height,
@@ -373,14 +360,13 @@ void CudaRasterizer::Rasterizer::backward(
 	float* dL_dsh,
 	float* dL_dscale,
 	float* dL_drot,
-	bool debug)
-{
+	bool debug
+) {
 	GeometryState geomState = GeometryState::fromChunk(geom_buffer, P);
 	BinningState binningState = BinningState::fromChunk(binning_buffer, R);
 	ImageState imgState = ImageState::fromChunk(img_buffer, width * height);
 
-	if (radii == nullptr)
-	{
+	if (radii == nullptr) {
 		radii = geomState.internal_radii;
 	}
 
@@ -394,7 +380,7 @@ void CudaRasterizer::Rasterizer::backward(
 	// opacity and RGB of Gaussians from per-pixel loss gradients.
 	// If we were given precomputed colors and not SHs, use them.
 	const float* color_ptr = (colors_precomp != nullptr) ? colors_precomp : geomState.rgb;
-	CHECK_CUDA(BACKWARD::render(
+	CHECK_CUDA(Rasterizer::Backward::render(
 		tile_grid,
 		block,
 		imgState.ranges,
@@ -419,7 +405,8 @@ void CudaRasterizer::Rasterizer::backward(
 	// given to us or a scales/rot pair? If precomputed, pass that. If not,
 	// use the one we computed ourselves.
 	const float* cov3D_ptr = (cov3D_precomp != nullptr) ? cov3D_precomp : geomState.cov3D;
-	CHECK_CUDA(BACKWARD::preprocess(P, D, M,
+	CHECK_CUDA(Rasterizer::Backward::preprocess(
+		P, D, M,
 		(float3*)means3D,
 		radii,
 		shs,
@@ -441,4 +428,20 @@ void CudaRasterizer::Rasterizer::backward(
 		dL_dsh,
 		(glm::vec3*)dL_dscale,
 		(glm::vec4*)dL_drot), debug)
+}
+
+// Mark Gaussians as visible/invisible, based on view frustum testing
+void Rasterizer::markVisible(
+	int P,
+	float* means3D,
+	float* viewmatrix,
+	float* projmatrix,
+	bool* present)
+{
+	checkFrustum << <(P + 255) / 256, 256 >> > (
+		P,
+		means3D,
+		viewmatrix, projmatrix,
+		present
+	);
 }

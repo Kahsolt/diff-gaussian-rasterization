@@ -9,8 +9,8 @@
  * For inquiries contact  george.drettakis@inria.fr
  */
 
-#ifndef CUDA_RASTERIZER_FORWARD_H_INCLUDED
-#define CUDA_RASTERIZER_FORWARD_H_INCLUDED
+#ifndef RASTERIZER_FORWARD_H
+#define RASTERIZER_FORWARD_H
 
 #include <cuda.h>
 #include "cuda_runtime.h"
@@ -18,10 +18,11 @@
 #define GLM_FORCE_CUDA
 #include <glm/glm.hpp>
 
-namespace FORWARD
+namespace Rasterizer::Forward
 {
 	// Perform initial steps for each Gaussian prior to rasterization.
-	void preprocess(int P, int D, int M,
+	void preprocess(
+		int P, int D, int M,
 		const float* orig_points,
 		const glm::vec3* scales,
 		const float scale_modifier,
@@ -45,7 +46,8 @@ namespace FORWARD
 		float4* conic_opacity,
 		const dim3 grid,
 		uint32_t* tiles_touched,
-		bool prefiltered);
+		bool prefiltered
+	);
 
 	// Main rasterization method.
 	void render(
@@ -61,8 +63,8 @@ namespace FORWARD
 		uint32_t* n_contrib,
 		const float* bg_color,
 		float* out_color,
-		float* out_importance_map);
+		float* out_importance_map
+	);
 }
-
 
 #endif

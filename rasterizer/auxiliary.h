@@ -9,8 +9,8 @@
  * For inquiries contact  george.drettakis@inria.fr
  */
 
-#ifndef CUDA_RASTERIZER_AUXILIARY_H_INCLUDED
-#define CUDA_RASTERIZER_AUXILIARY_H_INCLUDED
+#ifndef RASTERIZER_AUXILIARY_H
+#define RASTERIZER_AUXILIARY_H
 
 #include "config.h"
 #include "stdio.h"

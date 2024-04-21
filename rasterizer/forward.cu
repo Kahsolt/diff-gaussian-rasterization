@@ -268,7 +268,8 @@ renderCUDA(
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
 	float* __restrict__ out_color,
-	float* __restrict__ out_importance_map
+	float* __restrict__ out_importance_map,
+	int* __restrict__ out_n_contrib
 ) {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
@@ -298,6 +299,7 @@ renderCUDA(
 	float T = 1.0f;
 	uint32_t contributor = 0;
 	uint32_t last_contributor = 0;
+	uint32_t n_contributor = 0;
 	float C[CHANNELS] = { 0 };
 	float O = 0;
 
@@ -352,9 +354,11 @@ renderCUDA(
 
 			T = test_T;
 
-			// Keep track of last range entry to update this
-			// pixel.
+			// Keep track of last range entry to update this pixel.
 			last_contributor = contributor;
+
+			// effective contributers
+			n_contributor++;
 		}
 	}
 
@@ -363,6 +367,7 @@ renderCUDA(
 	if (inside) {
 		final_T[pix_id] = T;
 		n_contrib[pix_id] = last_contributor;
+		out_n_contrib[pix_id] = n_contributor;
 		for (int ch = 0; ch < CHANNELS; ch++)
 			out_color[ch * H * W + pix_id] = C[ch] + T * bg_color[ch];
 		out_importance_map[pix_id] = O;
@@ -437,7 +442,8 @@ void Rasterizer::Forward::render(
 	uint32_t* n_contrib,
 	const float* bg_color,
 	float* out_color,
-	float* out_importance_map
+	float* out_importance_map,
+	int* out_n_contrib
 ) {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
 		ranges,
@@ -451,6 +457,7 @@ void Rasterizer::Forward::render(
 		n_contrib,
 		bg_color,
 		out_color,
-		out_importance_map
+		out_importance_map,
+		out_n_contrib
 	);
 }

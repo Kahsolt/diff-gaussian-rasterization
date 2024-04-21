@@ -66,8 +66,8 @@ class CudaRasterizer(Function):
         # Invoke C++/CUDA rasterizer
         cpu_args = cpu_deep_copy_tuple(args) # Copy them before they can be corrupted
         try:
-            # int, [C=3, H=545, W=980], [P=182686], [14433784], [56993151], [8545824]
-            num_rendered, color, importance_map, radii, geomBuffer, binningBuffer, imgBuffer = _C.rasterize_gaussians(*args)
+            # int, [C=3, H=545, W=980], [H, W], [P=182686], [14433784], [56993151], [8545824]
+            num_rendered, color, importance_map, n_contrib, radii, geomBuffer, binningBuffer, imgBuffer = _C.rasterize_gaussians(*args)
         except Exception as ex:
             torch.save(cpu_args, "snapshot_fw.dump")
             print("\nAn error occured in forward. Please forward snapshot_fw.dump for debugging.")
@@ -77,10 +77,10 @@ class CudaRasterizer(Function):
         ctx.raster_settings = raster_settings
         ctx.num_rendered = num_rendered
         ctx.save_for_backward(colors_precomp, importances, means3D, scales, rotations, cov3Ds_precomp, radii, sh, geomBuffer, binningBuffer, imgBuffer)
-        return color, importance_map, radii
+        return color, importance_map, n_contrib, radii, imgBuffer
 
     @staticmethod
-    def backward(ctx, grad_out_color, grad_out_importance_map, grad_out_radii):
+    def backward(ctx, grad_out_color, grad_out_importance_map, grad_n_contrib, grad_radii, grad_imgBuffer):
         # Restore necessary values from context
         num_rendered = ctx.num_rendered
         raster_settings = ctx.raster_settings
@@ -133,7 +133,7 @@ class CudaRasterizer(Function):
             grad_scales,
             grad_rotations,
             grad_cov3Ds_precomp,
-            None,
+            None,   # raster_settings
         )
 
 
@@ -170,7 +170,7 @@ class GaussianRasterizer(nn.Module):
         )
         return visible
 
-    def forward(self, means3D, means2D, opacities, importances, shs = None, colors_precomp = None, scales = None, rotations = None, cov3D_precomp = None):
+    def forward(self, means3D, means2D, opacities, importances=None, shs=None, colors_precomp=None, scales=None, rotations=None, cov3D_precomp=None):
         raster_settings = self.settings
 
         if (shs is None and colors_precomp is None) or (shs is not None and colors_precomp is not None):
@@ -182,6 +182,8 @@ class GaussianRasterizer(nn.Module):
             shs = Tensor([])
         if colors_precomp is None:
             colors_precomp = Tensor([])
+        if importances is None:
+            importances = torch.ones_like(opacities)
         if scales is None:
             scales = Tensor([])
         if rotations is None:
@@ -190,7 +192,7 @@ class GaussianRasterizer(nn.Module):
             cov3D_precomp = Tensor([])
 
         # Invoke C++/CUDA rasterization routine
-        return CudaRasterizer.apply(
+        color, importance_map, n_contrib, radii, imgBuffer =  CudaRasterizer.apply(
             means3D,
             means2D,
             shs,
@@ -202,3 +204,5 @@ class GaussianRasterizer(nn.Module):
             cov3D_precomp,
             raster_settings, 
         )
+
+        return color, importance_map, n_contrib, radii, imgBuffer

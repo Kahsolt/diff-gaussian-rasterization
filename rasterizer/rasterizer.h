@@ -99,6 +99,7 @@ namespace Rasterizer
 		const bool prefiltered,
 		float* out_color,
 		float* out_importance_map,
+		int* out_n_contrib,
 		int* radii = nullptr,
 		bool debug = false
 	);

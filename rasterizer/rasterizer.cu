@@ -205,6 +205,7 @@ int Rasterizer::forward(
 	const bool prefiltered,
 	float* out_color,
 	float* out_importance_map,
+	int* out_n_contrib,
 	int* radii,
 	bool debug
 ) {
@@ -321,7 +322,8 @@ int Rasterizer::forward(
 		imgState.n_contrib,
 		background,
 		out_color,
-		out_importance_map), debug)
+		out_importance_map,
+		out_n_contrib), debug)
 
 	return num_rendered;
 }
